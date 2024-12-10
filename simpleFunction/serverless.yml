@@ -1,0 +1,27 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: sergiohidalgocaceres
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: basic
+# "service" is the name of this project. This will also be added to your AWS resource names.
+service: simpleFunction
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+
+functions:
+  hello:
+    handler: handler.init
+    events:
+      - httpApi:
+          path: /simple
+          method: get
+      - httpApi:
+          path: /simple/{simpleId}/detail
+          method: get
+  other:
+    handler: handler-function.init
+    events:
+      - httpApi:
+          path: /client
+          method: get
