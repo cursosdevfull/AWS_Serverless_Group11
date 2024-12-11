@@ -1,0 +1,29 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: sergiohidalgocaceres
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: trigger-lambda
+# "service" is the name of this project. This will also be added to your AWS resource names.
+service: lambda-trigger
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: lambda:InvokeFunction
+          Resource: arn:aws:lambda:us-east-1:282865065290:function:lambda-destination-dev-appointment-pe
+
+build:
+  esbuild:
+    bundle: true
+    minify: false
+    exclude:
+      - "@aws-sdk/*"
+    sourcemap:
+      type: linked
+
+functions:
+  appointment:
+    handler: src/handlers/appointment/main.trigger
