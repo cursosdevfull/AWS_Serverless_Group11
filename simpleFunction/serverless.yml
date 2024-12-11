@@ -13,15 +13,15 @@ functions:
   hello:
     handler: handler.init
     events:
-      - httpApi:
+      - http:
           path: /simple
           method: get
-      - httpApi:
+      - http:
           path: /simple/{simpleId}/detail
           method: get
   other:
     handler: handler-function.init
     events:
-      - httpApi:
+      - http:
           path: /client
           method: get
