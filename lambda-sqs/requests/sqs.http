@@ -1,0 +1,6 @@
+post https://6rgqmkzuoj.execute-api.us-east-1.amazonaws.com/dev/create
+Content-Type: application/json
+
+{
+  "message": "Hello from SQS!"
+}

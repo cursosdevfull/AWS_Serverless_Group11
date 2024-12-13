@@ -1,6 +1,6 @@
 .serverless
-simpleFunction
 0*
 lambda-lambda
+simpleFunction
 ts-function
 Clase0*
