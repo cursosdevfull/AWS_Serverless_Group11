@@ -2,8 +2,8 @@ post https://m3f4ahofxi.execute-api.us-east-1.amazonaws.com/dev/appointment
 Content-Type: application/json
 
 {
-	"countryISO": "PE",
-	"scheduleId": 1000,
+	"countryISO": "EC",
+	"scheduleId": 4569,
 	"medicId": 34,
 	"centerId": 3,
 	"patientId": 356

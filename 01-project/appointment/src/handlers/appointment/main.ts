@@ -1,15 +1,24 @@
-import { LambdaClient } from "@aws-sdk/client-lambda";
+import {
+  InvokeCommand,
+  InvokeCommandInput,
+  LambdaClient,
+} from "@aws-sdk/client-lambda";
 
 const client = new LambdaClient();
 
 export const execute = async (event: any) => {
   console.log("appointment handler called");
 
-  const body = JSON.parse(event.body);
-  const { countryISO } = body;
+  const { countryISO } = JSON.parse(event.body);
+  const lambdaNameToInvoke = process.env[`APPOINTMENT_${countryISO}`];
 
-  const lambdaLogicId = process.env[`APPOINTMENT_${countryISO}`];
-  console.log("lambdaLogicId", lambdaLogicId);
+  const params: InvokeCommandInput = {
+    FunctionName: lambdaNameToInvoke,
+    Payload: event.body,
+  };
+
+  const command = new InvokeCommand(params);
+  await client.send(command);
 
   return {
     statusCode: 200,
