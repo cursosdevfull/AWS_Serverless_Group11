@@ -1,0 +1,523 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: sergiohidalgocaceres
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: appointment
+# "service" is the name of this project. This will also be added to your AWS resource names.
+service: appointment
+
+provider:
+  name: aws
+  stage: dev
+  runtime: nodejs20.x
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: s3:*
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+          Resource: arn:aws:dynamodb:*:*:*
+        - Effect: Allow
+          Action: sns:Publish
+          Resource: "*"
+        - Effect: Allow
+          Action: ses:SendEmail
+          Resource: "*"
+        - Effect: Allow
+          Action: events:PutEvents
+          Resource: "*"
+        - Effect: Allow
+          Action: sqs:SendMessage
+          Resource:
+            - Fn::GetAtt:
+                - AppointmentSQSPE
+                - Arn
+            - Fn::GetAtt:
+                - AppointmentSQSEC
+                - Arn
+            - Fn::GetAtt:
+                - AppointmentSQSAR
+                - Arn
+            - Fn::GetAtt:
+                - AppointmentUpdateSQS
+                - Arn
+            - Fn::GetAtt:
+                - SentEmailSQS
+                - Arn
+
+plugins:
+  - serverless-s3-sync
+
+custom:
+  s3Sync:
+    - bucketName: ${self:service}-${self:provider.stage}-template-html-bucket
+      bucketPrefix: templates/
+      localDir: html
+
+build:
+  esbuild:
+    bundle: true
+    minify: false
+    exclude:
+      - "@aws-sdk/*"
+    sourcemap:
+      type: linked
+
+functions:
+  patient:
+    handler: src/handlers/patient/main.execute
+    events:
+      - s3:
+          bucket: !Ref PatientBucket
+          event: "s3:ObjectCreated:*"
+          rules:
+            - prefix: "patients/"
+            - suffix: ".csv"
+          existing: true
+    environment:
+      PATIENT_TABLE: !Ref AppointmentPatient
+
+  sent-email:
+    handler: src/handlers/sent-email/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - SentEmailSQS
+              - Arn
+    environment:
+      TOPIC_ARN: !Ref AppointmentSNS
+      APPOINTMENT_TABLE: !Ref AppointmentTable
+
+  report:
+    handler: src/handlers/report/main.execute
+    events:
+      - schedule: cron(0/1 * * * ? *)
+
+  appointment:
+    handler: src/handlers/appointment/main.execute
+    events:
+      - http:
+          path: /appointment
+          method: post
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - AppointmentUpdateSQS
+              - Arn
+    environment:
+      TOPIC_ARN: !Ref AppointmentSNS
+      APPOINTMENT_TABLE: !Ref AppointmentTable
+      EVENT_BUS_NAME: !Ref EventBusAppointment
+
+  appointment-pe:
+    handler: src/handlers/appointment-pe/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - AppointmentSQSPE
+              - Arn
+    environment:
+      APPOINTMENT_TABLE: !Ref AppointmentPETable
+      TOPIC_ARN: !Ref AppointmentUpdateSNS
+      SQS_URL_SENT_EMAIL: !Ref SentEmailSQS
+
+  appointment-ec:
+    handler: src/handlers/appointment-ec/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - AppointmentSQSEC
+              - Arn
+    environment:
+      APPOINTMENT_TABLE: !Ref AppointmentECTable
+      TOPIC_ARN: !Ref AppointmentUpdateSNS
+      SQS_URL_SENT_EMAIL: !Ref SentEmailSQS
+
+  salesforce:
+    handler: src/handlers/salesforce/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - SalesforceSQS
+              - Arn
+
+  appointment-ar:
+    handler: src/handlers/appointment-ar/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - AppointmentSQSAR
+              - Arn
+    environment:
+      APPOINTMENT_TABLE: !Ref AppointmentARTable
+      TOPIC_ARN: !Ref AppointmentUpdateSNS
+      SQS_URL_SENT_EMAIL: !Ref SentEmailSQS
+      BUCKET_NAME_EMAIL: !Ref TemplateHTMLBucket
+
+resources:
+  Resources:
+    SentEmailSQS:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-sent-email
+
+    AppointmentSNS:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName: "Appointment Topic"
+        TopicName: ${self:service}-${self:provider.stage}-appointment
+
+    AppointmentUpdateSNS:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName: "Appointment Update Topic"
+        TopicName: ${self:service}-${self:provider.stage}-appointment-update
+
+    AppointmentUpdateSQS:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-appointment-update
+
+    AppointmentUpdateSQSSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint:
+          Fn::GetAtt:
+            - AppointmentUpdateSQS
+            - Arn
+        TopicArn:
+          Ref: AppointmentUpdateSNS
+        RawMessageDelivery: true
+
+    AppointmentUpdateSQSPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref AppointmentUpdateSQS
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AppointmentUpdateSQS.Arn
+              Principal: "*"
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !Ref AppointmentUpdateSNS
+
+    AppointmentSQSPE:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-appointment-pe
+
+    AppointmentSQSPEPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref AppointmentSQSPE
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AppointmentSQSPE.Arn
+              Principal: "*"
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !Ref AppointmentSNS
+
+    AppointmentSQSPESubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint:
+          Fn::GetAtt:
+            - AppointmentSQSPE
+            - Arn
+        TopicArn:
+          Ref: AppointmentSNS
+        FilterPolicy:
+          countryISO:
+            - "PE"
+        FilterPolicyScope: MessageBody
+        RawMessageDelivery: true
+
+    AppointmentSQSEC:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-appointment-ec
+
+    AppointmentSQSECPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref AppointmentSQSEC
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AppointmentSQSEC.Arn
+              Principal: "*"
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !Ref AppointmentSNS
+
+    AppointmentSQSECSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint:
+          Fn::GetAtt:
+            - AppointmentSQSEC
+            - Arn
+        TopicArn:
+          Ref: AppointmentSNS
+        FilterPolicy:
+          countryISO:
+            - "EC"
+        FilterPolicyScope: MessageBody
+        RawMessageDelivery: true
+
+    AppointmentSQSAR:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-appointment-ar
+
+    AppointmentSQSARPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref AppointmentSQSAR
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt AppointmentSQSAR.Arn
+              Principal: "*"
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !Ref AppointmentSNS
+
+    AppointmentSQSARSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint:
+          Fn::GetAtt:
+            - AppointmentSQSAR
+            - Arn
+        TopicArn:
+          Ref: AppointmentSNS
+        FilterPolicy:
+          countryISO:
+            - "AR"
+        FilterPolicyScope: MessageBody
+        RawMessageDelivery: true
+
+    AppointmentTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-appointment
+        AttributeDefinitions:
+          - AttributeName: countryISO
+            AttributeType: S
+          - AttributeName: patientId
+            AttributeType: S
+          - AttributeName: appointmentId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: appointmentId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        GlobalSecondaryIndexes:
+          - IndexName: patientIdIndex
+            KeySchema:
+              - AttributeName: patientId
+                KeyType: HASH
+              - AttributeName: countryISO
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    AppointmentPETable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-appointment-pe
+        AttributeDefinitions:
+          - AttributeName: countryISO
+            AttributeType: S
+          - AttributeName: patientId
+            AttributeType: S
+          - AttributeName: appointmentId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: appointmentId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        GlobalSecondaryIndexes:
+          - IndexName: patientIdIndex
+            KeySchema:
+              - AttributeName: patientId
+                KeyType: HASH
+              - AttributeName: countryISO
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    AppointmentECTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-appointment-ec
+        AttributeDefinitions:
+          - AttributeName: countryISO
+            AttributeType: S
+          - AttributeName: patientId
+            AttributeType: S
+          - AttributeName: appointmentId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: appointmentId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        GlobalSecondaryIndexes:
+          - IndexName: patientIdIndex
+            KeySchema:
+              - AttributeName: patientId
+                KeyType: HASH
+              - AttributeName: countryISO
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    AppointmentARTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-appointment-ar
+        AttributeDefinitions:
+          - AttributeName: countryISO
+            AttributeType: S
+          - AttributeName: patientId
+            AttributeType: S
+          - AttributeName: appointmentId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: appointmentId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        GlobalSecondaryIndexes:
+          - IndexName: patientIdIndex
+            KeySchema:
+              - AttributeName: patientId
+                KeyType: HASH
+              - AttributeName: countryISO
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    AppointmentPatient:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${self:provider.stage}-patient
+        AttributeDefinitions:
+          - AttributeName: patientId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: patientId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    PatientBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:service}-${self:provider.stage}-patient-bucket
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
+
+    TemplateHTMLBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:service}-${self:provider.stage}-template-html-bucket
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
+        WebsiteConfiguration:
+          IndexDocument: index.html
+          ErrorDocument: index.html
+
+    TemplateHTMLBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref TemplateHTMLBucket
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: s3:GetObject
+              Resource: !Join
+                - ""
+                - - "arn:aws:s3:::"
+                  - !Ref TemplateHTMLBucket
+                  - /*
+
+    SalesforceSQS:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-salesforce
+
+    EventBusAppointment:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: ${self:service}-${self:provider.stage}-event-bus-appointment
+
+    EventBusAppointmentRule:
+      Type: AWS::Events::Rule
+      Properties:
+        Name: ${self:service}-${self:provider.stage}-event-rule-appointment
+        EventBusName: !Ref EventBusAppointment
+        EventPattern:
+          source:
+            - WEB
+            - MOBILE
+          detail-type:
+            - APPOINTMENT_CREATED
+            - APPOINTMENT_CANCELLED
+        Targets:
+          - Arn:
+              Fn::GetAtt:
+                - SalesforceSQS
+                - Arn
+            Id:
+              Fn::GetAtt:
+                - SalesforceSQS
+                - QueueName
+
+    SalesforceSQSPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref SalesforceSQS
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt SalesforceSQS.Arn
+              Principal:
+                Service: events.amazonaws.com

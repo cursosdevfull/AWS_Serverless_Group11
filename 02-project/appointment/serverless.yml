@@ -1,0 +1,86 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: sergiohidalgocaceres
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: appointment
+# "service" is the name of this project. This will also be added to your AWS resource names.
+service: appointment
+
+provider:
+  name: aws
+  stage: dev
+  runtime: nodejs20.x
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: sqs:SendMessage
+          Resource:
+            - Fn::GetAtt:
+                - AppointmentSQSPE
+                - Arn
+            - Fn::GetAtt:
+                - AppointmentSQSEC
+                - Arn
+            - Fn::GetAtt:
+                - AppointmentSQSAR
+                - Arn
+
+build:
+  esbuild:
+    bundle: true
+    minify: false
+    exclude:
+      - "@aws-sdk/*"
+    sourcemap:
+      type: linked
+
+functions:
+  appointment:
+    handler: src/handlers/appointment/main.execute
+    events:
+      - http:
+          path: /appointment
+          method: post
+    environment:
+      SQS_URL_PE: !Ref AppointmentSQSPE
+      SQS_URL_EC: !Ref AppointmentSQSEC
+      SQS_URL_AR: !Ref AppointmentSQSAR
+
+  appointment-pe:
+    handler: src/handlers/appointment-pe/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - AppointmentSQSPE
+              - Arn
+  appointment-ec:
+    handler: src/handlers/appointment-ec/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - AppointmentSQSEC
+              - Arn
+  appointment-ar:
+    handler: src/handlers/appointment-ar/main.execute
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - AppointmentSQSAR
+              - Arn
+resources:
+  Resources:
+    AppointmentSQSPE:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-appointment-pe
+    AppointmentSQSEC:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-appointment-ec
+    AppointmentSQSAR:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-appointment-ar

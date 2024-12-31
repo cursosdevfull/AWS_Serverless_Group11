@@ -1,0 +1,10 @@
+post https://iu4unpcorh.execute-api.us-east-1.amazonaws.com/dev/appointment
+Content-Type: application/json
+
+{
+	"countryISO": "EC",
+	"scheduleId": 4569,
+	"medicId": 34,
+	"centerId": 3,
+	"patientId": 356
+}

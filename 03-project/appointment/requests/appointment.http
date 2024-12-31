@@ -1,0 +1,10 @@
+post https://p6fhw3fag1.execute-api.us-east-1.amazonaws.com/dev/appointment
+Content-Type: application/json
+
+{
+	"countryISO": "AR",
+	"scheduleId": 10800,
+	"medicId": 34,
+	"centerId": 3,
+	"patientId": "dc8305bd-d64e-4197-a097-93ca64a1e3bc"
+}
